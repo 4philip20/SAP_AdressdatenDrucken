@@ -43,6 +43,12 @@ TYPES: BEGIN OF ty_file,
          kwmeng TYPE kwmeng,
        END OF ty_file.
 
+TYPES: BEGIN OF ty_errors,
+          status TYPE zsd_status,
+          kunnr TYPE kunnr,
+          zeile TYPE SYST_TABIX,
+      END OF ty_errors.
+
 * Globale interne Tabellen
 *--------------------------------------------------------------------*
 DATA: gt_mara TYPE TABLE OF ty_mara.
@@ -55,6 +61,11 @@ DATA: gt_output TYPE TABLE OF zmm_mig_material_conv_output.
 DATA: gt_message TYPE TABLE OF bapiret2.
 
 DATA: gt_file TYPE TABLE OF ty_file.
+
+DATA: gt_errors TYPE TABLE OF ty_errors.
+
+DATA: lt_errors TYPE ty_errors.
+DATA: ld_errors TYPE ty_errors.
 * Globale Objekte
 *--------------------------------------------------------------------*
 DATA: go_excel  TYPE REF TO zcl_excel,
@@ -75,6 +86,7 @@ DATA: gv_file TYPE string.
 *--------------------------------------------------------------------*
 *Subroutin Ablauf
 *-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-
+
 
 
 TABLES: kna1, knvv, zbwbpcust_01.
@@ -118,9 +130,12 @@ DATA order_by  TYPE string.
 * Selektion Screen
 ******************************************************************************************************************************
 SELECTION-SCREEN BEGIN OF BLOCK bg_005 WITH FRAME TITLE TEXT-500.
-PARAMETERS: p_filx    AS CHECKBOX DEFAULT 'X'. "FILE
+PARAMETERS: p_filx    AS CHECKBOX USER-COMMAND act_file DEFAULT ''. "FILE
 "IF p_filx EQ 'X'.
+  PARAMETERS: p_file1 RADIOBUTTON GROUP file .
+  PARAMETERS: p_file2 RADIOBUTTON GROUP file .
   PARAMETERS: p_file TYPE string LOWER CASE.
+
 "ELSE.
   "PARAMETERS: p_file TYPE string LOWER CASE NO-DISPLAY.
 "ENDIF.
@@ -153,14 +168,15 @@ SELECTION-SCREEN END OF BLOCK bg_002.
 SELECTION-SCREEN BEGIN OF BLOCK bg_006 WITH FRAME TITLE TEXT-600.
 PARAMETERS: p_list AS CHECKBOX  DEFAULT 'X',
             p_stat AS CHECKBOX  DEFAULT 'X',
-            p_form AS CHECKBOX  DEFAULT 'X',
+            p_form AS CHECKBOX  DEFAULT 'X'.
 *            p_downl AS CHECKBOX,
-            p_excel AS CHECKBOX.
+*            p_excel AS CHECKBOX.
 
 SELECTION-SCREEN END OF BLOCK bg_006.
 
+
 ******************************************************************************************************************************
-* Initialisation der Screen-Variablen und allen anderen Variablen wenn nötig.
+* Initialisation der Screen-Variablen und allen anderen Variablen wenn nÃ¶tig.
 ******************************************************************************************************************************
 INITIALIZATION.
 * Default = ESA und Grossisten.
@@ -182,6 +198,25 @@ zkatr2-sign ='I'.
 zkatr2-option = 'NE'.
 APPEND zkatr2.
 
+******************************************************************************************************************************
+* Loop Ã¼ber Feld, um Sichbar oder nicht Sichtbar.
+******************************************************************************************************************************
+AT SELECTION-SCREEN OUTPUT.
+
+  LOOP AT SCREEN.
+    IF p_filx EQ abap_true.
+      IF screen-name CS 'P_FILE'.
+         screen-active = 1.
+      ENDIF.
+    ELSE.
+      IF screen-name CS 'P_FILE'.
+         screen-active = 0.
+      ENDIF.
+    ENDIF.
+    MODIFY SCREEN.
+  ENDLOOP.
+
+*LOAD-OF-PROGRAM.
 
 
 *p_file = 'C:\Users\philip.rippstein\Desktop\Expresskunden01.xlsx'.
@@ -193,12 +228,13 @@ AT SELECTION-SCREEN ON VALUE-REQUEST FOR p_file.
   PERFORM f4_file.
 
 AT SELECTION-SCREEN ON p_file.
-  IF p_filx = 'X'.
+*  IF p_filx = 'X' AND sy-ucomm = 'ACT_FILE' AND p_file NE space.
+  IF p_filx = 'X' AND p_file NE space.
     PERFORM check_file.
   ENDIF.
 
 
-"Hier abfragen IF Kunde aktiv usw... Dann abfüllen
+"Hier abfragen IF Kunde aktiv usw... Dann abfÃ¼llen
 
 
 ******************************************************************************************************************************
@@ -213,7 +249,7 @@ START-OF-SELECTION.
 ************************************************************************
 * Einlesen des Files in die Temp Tabelle gt_output_filed
 ************************************************************************
-  IF p_filx = 'X'.
+  IF p_filx = 'X' AND p_file NE space.
     PERFORM upload_excel_data.
   ENDIF.
 ************************************************************************
@@ -232,6 +268,13 @@ START-OF-SELECTION.
 * Verdichten der Kundennumern ( Jeder Kunde nur einmal )
 * dann sind alle Nummer in der Tabelle gt_output_data
 ************************************************************************
+IF p_file1 ='X' AND p_file NE space.
+LOOP AT gt_output_file INTO ls_output_file.
+  COLLECT ls_output_file INTO gt_output_data.
+ENDLOOP.
+
+ELSEIF p_file2 ='X' AND p_file NE space.
+
 LOOP AT gt_output_file INTO ls_output_file.
   COLLECT ls_output_file INTO gt_output_data.
 ENDLOOP.
@@ -243,6 +286,8 @@ ENDLOOP.
 LOOP AT gt_output_mitinh INTO ls_output_mitinh.
   COLLECT ls_output_mitinh INTO gt_output_data.
 ENDLOOP.
+ENDIF.
+
 
     "FEHLER Excel nicht lesbar oder keine Daten.
 ***    MESSAGE e022(zsd_ig).
@@ -270,9 +315,9 @@ END-OF-SELECTION.
 ************************************************************************
 * Excel Output erstellen.
 ************************************************************************
-  IF p_excel NE space.
-    PERFORM excel_datei_erstellen.
-  ENDIF.
+*  IF p_excel NE space.
+*    PERFORM excel_datei_erstellen.
+*  ENDIF.
 ************************************************************************
 * Zum Schluss evt. Kontroll-Liste erstellen.
 ************************************************************************
@@ -328,15 +373,14 @@ ELSE.
   MESSAGE e052(zsd_ig).
 ENDIF.
 
-
-
-
 ENDFORM.
 *********************************************************************************************************************************
-* File name muss geprüft werden ob es überhaupt exisitert
+* File name muss geprÃ¼ft werden ob es Ã¼berhaupt exisitert
 *********************************************************************************************************************************
 FORM check_file .
 *Lokale Variablen
+"  CHECK p_filx EQ abap_true AND sy-ucomm NE 'ACT_FILE' AND p_file IS INITIAL.
+
   DATA: lv_result TYPE abap_bool.
 *
   DATA: lv_file(1024) TYPE c.
@@ -358,6 +402,8 @@ FORM check_file .
       OTHERS               = 5.
   IF sy-subrc <> 0.
 * Implement suitable error handling here
+   MESSAGE e040(zsd_ig).
+    EXIT.
   ENDIF.
 
   IF lv_result NE abap_true.
@@ -378,8 +424,9 @@ FORM check_file .
   CHECK lv_extension NE 'XLSX'.
 
   MESSAGE e021(zsd_ig).
+
   ENDIF.
-* Datei ist kein XLSX.Bitte prüfen Sie die ausgewählte Datei.
+* Datei ist kein XLSX.Bitte prÃ¼fen Sie die ausgewÃ¤hlte Datei.
 ENDFORM.
 
 
@@ -392,6 +439,9 @@ FORM upload_excel_data .
   DATA: lv_extension TYPE string.
   DATA: ls_output TYPE zmm_mig_material_conv_output.
   DATA: ls_message TYPE bapiret2.
+
+
+*gt_errors
 
   TRY.
 
@@ -414,7 +464,7 @@ FORM upload_excel_data .
 
         WHEN OTHERS.
           MESSAGE i021(zsd_ig).
-* Datei ist kein XLSX.Bitte prüfen Sie die ausgewählte Datei.
+           "Datei ist kein XLSX.Bitte prÃ¼fen Sie die ausgewÃ¤hlte Datei.
           RETURN.
 
       ENDCASE.
@@ -425,9 +475,20 @@ FORM upload_excel_data .
           go_worksheet->get_table( EXPORTING iv_skipped_rows = 1
                                    IMPORTING et_table        = gt_file1 ).
 
+*         IF gt_file1-kunnr is INITIAL.
+*         IF gt_file1->kunnr IS INITIAL.
+
+
+*          READ TABLE gt_file1 INTO gw_file1 INDEX 1.
+
+*                       MESSAGE i021(zsd_ig).
+*                       " Datei ist kein XLSX.Bitte prÃ¼fen Sie die ausgewÃ¤hlte Datei.
+*                       RETURN.
+
+
           LOOP AT gt_file1 REFERENCE INTO DATA(lds_file1).
 
-            DATA(lv_tabix) = sy-tabix.
+            DATA(lv_tabix) = sy-tabix + 1.
 
             DATA: lv_string TYPE string.
 
@@ -437,11 +498,27 @@ FORM upload_excel_data .
 
             ls_output-status = icon_led_inactive.
 *           Wieso ?
-            IF lds_file1->kunnr IS INITIAL OR
-              lds_file1->kunnr CA '[A-Z]' OR lds_file1->kunnr EQ ''.
+*            IF lds_file1->kunnr IS INITIAL OR
+            "IF lds_file1->kunnr CA '[A-Z]' OR lds_file1->kunnr EQ ''.
+            IF lds_file1->kunnr CA SY-ABCDE OR lds_file1->kunnr EQ ''OR lds_file1->kunnr CA '[abcdefghijklmnopqrstuvwxyzÃ¤Ã¶Ã¼]'.
               "Dann was ???
-              ls_output-status = icon_led_red.
+              "BEI FEHLER IN ZEILE IGNORIEREN UND WEITERMACHEN
+              "ls_output-status = icon_led_red.
               MESSAGE s040(zsd_ig).
+
+*              set SCREEN '0'.
+*              LEAVE SCREEN.
+
+*              gt_errors-status = icon_led_red.
+*              gt_errors-kunnr = lds_file1->kunnr.
+
+
+               lt_errors-status = icon_led_red.
+               lt_errors-kunnr = lds_file1->kunnr.
+               lt_errors-zeile = sy-tabix + 1.
+
+               "Folgende konnten nicht gelesen werden ->gt_errors
+               APPEND lt_errors TO gt_errors.
             ELSE.
               "Error Catch cx_root
               CALL FUNCTION 'CONVERSION_EXIT_ALPHA_INPUT'
@@ -459,41 +536,42 @@ FORM upload_excel_data .
             "Only append in ELSE FALL???
             APPEND ls_output_file TO gt_output_file.
 
+
           ENDLOOP.
         CATCH zcx_excel INTO lx_excel.
           MESSAGE s022(zsd_ig).
-*         Datei konnte nicht geöffnet werden.
+*         Datei konnte nicht geÃ¶ffnet werden.
           RETURN.
       ENDTRY.
 
     CATCH cx_root INTO lx_error.
       MESSAGE s022(zsd_ig).
-*         Datei konnte nicht geöffnet werden.
+*         Datei konnte nicht geÃ¶ffnet werden.
       RETURN.
   ENDTRY.
 
 ENDFORM.
 
-FORM read_data .
+FORM read_data.
   CLEAR lt_kunden_adressen.
 
  SELECT language AS spras, country AS land1, postalcode AS pstlz, businesspartner AS kunnr, addressnumber AS adrnr
    FROM zbw_bp_cds_b_bpcust_01
    FOR ALL ENTRIES IN @gt_output_data
-   WHERE businesspartner = @gt_output_data-kunnr       "Geschäftspartner
-    AND businesspartner IN @zkunnr          "Geschäftspartner
-    and DISTRIBUTIONCHANNEL in @zvtweg      "Vertriebsweg (Alt ESA Dista usw.)
+   WHERE businesspartner = @gt_output_data-kunnr       "GeschÃ¤ftspartner
+    AND businesspartner IN @zkunnr          "GeschÃ¤ftspartner
+    AND distributionchannel IN @zvtweg      "Vertriebsweg (Alt ESA Dista usw.)
     AND customergroup   IN @zkdgrp          "Kundengruppe
     AND lifsd           IN @zlifsd          "Aktiv/inaktiv
     AND katr2           IN @zkatr2          "Werbung oder Mailing Code
-    and katr1           IN @zkatr1          "Vignetten
+    AND katr1           IN @zkatr1          "Vignetten
     AND language        IN @zspras          "Sprache
-    AND salesoffice     IN @zvkbur          "Verkaufsbüro
+    AND salesoffice     IN @zvkbur          "VerkaufsbÃ¼ro
     AND postalcode      IN @zpstlz          "PLZ
     AND language        IN @zspras          "Sprache
     AND kdkg1           IN @zkdkg1          "Garantie Kulanz
     AND kvgr1           IN @zkvgr1          "Kundenart ... Garage, Carroserie usw.
-    AND sperr EQ ' '             " (Ohne gelöschte)
+    AND sperr EQ ' '             " (Ohne gelÃ¶schte)
    INTO TABLE @lt_kunden_adressen.
 
    SORT lt_kunden_adressen BY kunnr .
@@ -506,18 +584,6 @@ ELSE.
   SORT lt_kunden_adressen BY kunnr.
 ENDIF.
 
-*********************************************************************************************  SELECT spras, land1, pstlz, kunnr, adrnr
-*********************************************************************************************    FROM kna1
-**********************************************************************************************     AND xsubt           IN @zkdgrp          "Kundengruppe
-*********************************************************************************************     AND lifsd           IN @zlifsd          "Aktiv/inaktiv
-*********************************************************************************************     AND katr2           IN @zkatr2          "Garantie/Kulanz
-*********************************************************************************************     AND spras           IN @zspras          "Sprache
-***********************************************************************************************     AND vkbur           IN @zvkbur          "Verkaufsbüro
-*********************************************************************************************     AND pstlz           IN @zpstlz          "PLZ
-*********************************************************************************************     AND kdkg1           IN @zkdkg1
-*********************************************************************************************     AND loevm EQ ''
-*********************************************************************************************   ORDER BY PRIMARY KEY
-*********************************************************************************************    INTO TABLE @lt_kunden_adressen.
 
 ENDFORM.
 
@@ -632,6 +698,18 @@ FORM liste_erstellen.
                 ld_kunden_adressen-pstlz.
  ENDLOOP.
   ULINE.
+
+  if p_filx EQ 'X'.
+WRITE: / 'Fehler bei Excel File "Kundennummer Konvention" Fehlgeschlagen bei:'.
+  ULINE.
+WRITE: / 'Status   Kundenummer        Excel Zeile'.
+LOOP AT gt_errors INTO ld_errors.
+WRITE: /(8) ld_errors-status,
+            ld_errors-kunnr,
+            ld_errors-zeile.
+ENDLOOP.
+ULINE.
+ENDIF.
 **********************  WRITE: / 'Anzahl Adressen auf Liste:      ', zclist.
 **********************  ULINE.
 ENDFORM.
@@ -641,7 +719,7 @@ FORM get_mitinhaber .
 
   SELECT businesspartner FROM zbw_bp_cds_b_bpcust_01 INTO TABLE @gt_output_mitinh
    WHERE lifsd              IN @zlifsd          "Aktiv/inaktiv
-     AND deletionindicator  EQ ''               "Löschvermerk
+     AND deletionindicator  EQ ''               "LÃ¶schvermerk
      AND zzgenossenschafter EQ 'X'.             "Genossenschafter
 
 ENDFORM.
@@ -651,15 +729,15 @@ FORM get_carro .
 
   SELECT businesspartner FROM zbw_bp_cds_b_bpcust_01 INTO TABLE @gt_output_carro
    WHERE lifsd          IN @zlifsd          "Aktiv/inaktiv
-     AND deletionindicator EQ ''            "Löschvermerk
+     AND deletionindicator EQ ''            "LÃ¶schvermerk
      AND zzcarrosserie_konzept EQ 'X'.
 
 ENDFORM.
 FORM get_statistik.
-  Data: itab type i.
+  DATA: itab TYPE i.
 *    NEW-PAGE.
 DESCRIBE TABLE lt_kunden_adressen LINES itab.
-write: / 'Anzal Kunden: ', itab.
+WRITE: / 'Anzal Kunden: ', itab.
 *    NEW-PAGE.
 ENDFORM.
 
